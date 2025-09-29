@@ -3,7 +3,7 @@ use actix_web::{http::header, web, App, HttpServer, Responder, HttpResponse};
 use serde::{Deserialize, Serialize};
 use reqwest::Client as HttpClient;
 use async_trait::async_trait;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -72,7 +72,7 @@ impl Database {
 
     //DATABASE SAVING
     fn save_to_file(&self, filename: &str) -> std::io::Result<()> {
-        let data:String = serde_json::to_string(&self);
+        let data= serde_json::to_string(&self)?;
         let mut file:fs::File = fs::File::create(filename)?;
         file.write_all(data.as_bytes())?;
         return Ok(())
@@ -91,12 +91,40 @@ struct AppState {
 }
 
 async fn create_task(app_state: web::Data<AppState>, new_task: web::Json<Task>) -> impl Responder {
-    let mut db: Mutex<Database> = app_state.db.lock().unwrap();
+    let mut db: MutexGuard<Database> = app_state.db.lock().unwrap();
     db.insert_task(new_task.into_inner());
     let _ = db.save_to_file("database.json");
     return HttpResponse::Ok().finish()
 }
 
-fn main() {
-    println!("Hello, world!");
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    let db = match Database::load_from_file("database.json") {
+        Ok(db) => db,
+        Err(_) => Database::new(),
+    };
+
+    let data = web::Data::new(AppState {
+        db: Mutex::new(db),
+        http_client: HttpClient::new(),
+    });
+
+    HttpServer::new(move || {
+        let cors = Cors::permissive()
+            .allowed_origin_fn(|origin, _req_head|{
+                origin.as_bytes().starts_with(b"http://localhost") || origin == "null"
+            })
+            .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
+            .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+            .allowed_header(header::CONTENT_TYPE)
+            .supports_credentials()
+            .max_age(3600);
+
+        App::new()
+            .app_data(data.clone())
+            .wrap(cors)
+            .route("/tasks", web::post().to(create_task))
+    })
+    .bind("127.0.0.1:8080")?
+    .run().await
 }
