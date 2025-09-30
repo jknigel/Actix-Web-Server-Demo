@@ -97,6 +97,14 @@ async fn create_task(app_state: web::Data<AppState>, new_task: web::Json<Task>) 
     return HttpResponse::Ok().finish()
 }
 
+async fn read_task(app_state: web::Data<AppState>, id: web::Path<u64>) -> impl Responder {
+    let db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
+    match db.get_task(id.into_inner()) {
+        Some(task) => HttpResponse::Ok().json(task),
+        None => HttpResponse::NotFound().finish(),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let db = match Database::load_from_file("database.json") {
@@ -124,6 +132,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(data.clone())
             .wrap(cors)
             .route("/tasks", web::post().to(create_task))
+            .route("/tasks/{id}", web::get().to(read_task))
     })
     .bind("127.0.0.1:8080")?
     .run().await
