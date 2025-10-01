@@ -105,6 +105,26 @@ async fn read_task(app_state: web::Data<AppState>, id: web::Path<u64>) -> impl R
     }
 }
 
+async fn read_all_tasks(app_state: web::Data<AppState>) -> impl Responder {
+    let db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
+    let tasks: Vec<&Task> = db.get_all_tasks();
+    return HttpResponse::Ok().json(tasks)
+}
+
+async fn update_task(app_state: web::Data<AppState>, task: web::Json<Task>) -> impl Responder {
+    let mut db: MutexGuard<Database> = app_state.db.lock().unwrap();
+    db.update_task(task.into_inner());
+    let _ = db.save_to_file("database.json");
+    return HttpResponse::Ok().finish()
+}
+
+async fn delete_task(app_state: web::Data<AppState>, id: web::Path<u64>) -> impl Responder {
+    let mut db: MutexGuard<Database> = app_state.db.lock().unwrap();
+    db.delete_task(id.into_inner());
+    let _ = db.save_to_file("database.json");
+    return HttpResponse::Ok().finish()
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let db = match Database::load_from_file("database.json") {
@@ -132,7 +152,10 @@ async fn main() -> std::io::Result<()> {
             .app_data(data.clone())
             .wrap(cors)
             .route("/tasks", web::post().to(create_task))
+            .route("/tasks", web::get().to(read_all_tasks))
+            .route("/tasks", web::put().to(update_task))
             .route("/tasks/{id}", web::get().to(read_task))
+            .route("/tasks/{id}", web::delete().to(delete_task))
     })
     .bind("127.0.0.1:8080")?
     .run().await
